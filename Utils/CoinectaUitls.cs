@@ -1,14 +1,44 @@
-using CardanoSharp.Wallet.Models.Transactions;
-using CardanoSharp.Wallet.Extensions.Models.Transactions;
 using PeterO.Cbor2;
+using CardanoSharp.Wallet.Models;
+using CardanoSharp.Wallet.Extensions.Models;
+using Address = CardanoSharp.Wallet.Models.Addresses.Address;
+using CardanoSharp.Wallet.TransactionBuilding;
+using CardanoSharp.Wallet.Utilities;
+using CardanoSharp.Wallet.Models.Transactions.TransactionWitness.PlutusScripts;
+using CardanoSharp.Wallet.Enums;
+using CardanoSharp.Wallet.Models.Transactions;
+using CardanoSharp.Wallet.Models.Transactions.TransactionWitness;
+using CardanoSharp.Wallet.Extensions.Models.Transactions.TransactionWitnesses;
 
 public class CoinectaUtils
 {
-    public static IEnumerable<TransactionInput> ConvertInputsCbor(IEnumerable<string> inputCbors)
+
+    public static IEnumerable<Utxo> ConvertUtxoCbor(IEnumerable<string> utxoCbors)
     {
-        return inputCbors.Select(cbor => {
-            var txInputCbor = CBORObject.DecodeFromBytes(Convert.FromHexString(cbor));
-            return txInputCbor.GetTransactionInput();
+        return utxoCbors.Select(utxoCbor =>
+        {
+            var utxoCborObj = CBORObject.DecodeFromBytes(Convert.FromHexString(utxoCbor));
+            return utxoCborObj.GetUtxo();
         }).ToList();
+    }
+
+    public static TransactionWitnessSet ConvertTxWitnessSetCbor(string txWitnessSetCbor)
+    {
+        var txWitnessSetCborObj = CBORObject.DecodeFromBytes(Convert.FromHexString(txWitnessSetCbor));
+        return txWitnessSetCborObj.GetTransactionWitnessSet();
+    }
+
+    public static Address ConvertAddressCbor(string addressCbor)
+    {
+        return new Address(Convert.FromHexString(addressCbor));
+    }
+
+    public static Address ValidatorAddress(byte[] validatorScriptCbor)
+    {
+        var plutusScript = PlutusV2ScriptBuilder.Create
+        .SetScript(validatorScriptCbor)
+        .Build();
+
+        return  AddressUtility.GetEnterpriseScriptAddress(plutusScript, NetworkType.Preview);
     }
 }

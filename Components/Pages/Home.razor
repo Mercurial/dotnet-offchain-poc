@@ -1,6 +1,16 @@
 ﻿@page "/"
 @rendermode InteractiveServer
+
+@using CardanoSharp.Wallet.Models.Transactions
+@using CardanoSharp.Wallet.CIPs.CIP2
+@using CardanoSharp.Wallet.CIPs.CIP2.ChangeCreationStrategies
+@using CardanoSharp.Wallet.Models.Transactions.TransactionWitness.PlutusScripts
+@using CardanoSharp.Wallet.TransactionBuilding
+@using CardanoSharp.Wallet.Extensions.Models.Transactions
+@using System.Text.Json
+
 @inject IJSRuntime JsRuntime
+@inject CoinectaService CoinectaService
 
 <PageTitle>Home</PageTitle>
 
@@ -18,6 +28,81 @@
     private async Task Lock()
     {
         var result = await JsRuntime.InvokeAsync<IEnumerable<string>>("getUtxos");
-        var txInputs = CoinectaUtils.ConvertInputsCbor(result);
+        var utxos = CoinectaUtils.ConvertUtxoCbor(result);
+
+        var coinSelectionStrategy = new LargestFirstStrategy();
+        var changeCreationStrategy = new SingleTokenBundleStrategy();
+        var coinSelectionService = new CoinSelectionService(coinSelectionStrategy, changeCreationStrategy);
+        var plutusJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText("onchain/always-true/plutus.json"));
+        var validatorCbor =
+        Convert.FromHexString(plutusJson.GetProperty("validators")[0].GetProperty("compiledCode").GetString()!);
+        var validatorAddress = CoinectaUtils.ValidatorAddress(validatorCbor);
+        var changeAddress = CoinectaUtils.ConvertAddressCbor((await JsRuntime.InvokeAsync<IEnumerable<string>>("getAddress")).ToList()[0]);
+
+        var output = new TransactionOutput();
+        output.Address = validatorAddress.GetBytes();
+
+        output.Value = new TransactionOutputValue()
+        {
+            Coin = 10_000_000,
+        };
+
+        output.DatumOption = new DatumOption()
+        {
+            Data = new PlutusDataConstr()
+            {
+                Alternative = 0,
+                Value = new PlutusDataArray { Value = [new PlutusDataInt { Value = 42 }] }
+            }
+        };
+
+        var coinSelectionResult = coinSelectionService.GetCoinSelection([output], utxos, changeAddress.ToString());
+
+        var txBodyBuilder = TransactionBodyBuilder.Create;
+
+        txBodyBuilder.AddOutput(output);
+
+        coinSelectionResult.Inputs.ForEach((input) => txBodyBuilder.AddInput(input));
+        coinSelectionResult.ChangeOutputs.ForEach((change) => txBodyBuilder.AddOutput(change));
+
+        var txBuilder = TransactionBuilder.Create
+            .SetBody(txBodyBuilder)
+            .SetWitnesses(TransactionWitnessSetBuilder.Create);
+
+        var tx = txBuilder.Build();
+        var fee = tx.CalculateAndSetFee(numberOfVKeyWitnessesToMock: 1);
+        tx.TransactionBody.TransactionOutputs.Last().Value.Coin -= fee;
+        var txCborHex = Convert.ToHexString(tx.Serialize());
+
+        var witnessSetCborHex = await JsRuntime.InvokeAsync<string>("signTx", txCborHex);
+        var witnessSet = CoinectaUtils.ConvertTxWitnessSetCbor(witnessSetCborHex);
+        @* var vkWitnessBuilder = new VKeyWitnessBuilder().WithSignature(witnessSet.VKeyWitnesses.ToList()[0].Signature);
+        var vkWitness = vkWitnessBuilder.Build(); *@
+        var witnessSetBuilder = TransactionWitnessSetBuilder.Create;
+
+        witnessSet.VKeyWitnesses.ToList().ForEach((witness) => witnessSetBuilder.AddVKeyWitness(witness));
+        
+        txBodyBuilder.SetFee(fee);
+        var signedTxBuilder = TransactionBuilder.Create
+            .SetBody(txBodyBuilder)
+            .SetWitnesses(witnessSetBuilder);
+        
+        var signedTx = signedTxBuilder.Build();
+        var signedTxCborHex = Convert.ToHexString(signedTx.Serialize());
+
+        @* var witnesses = TransactionWitnessSetBuilder.Create
+        .AddVKeyWitness(
+        new PublicKey(paymentPub.Key, paymentPub.Chaincode),
+        new PrivateKey(paymentPrv.Key, paymentPrv.Chaincode))
+        .AddRedeemer(spendRedeemderBuilder);
+
+    var tx = TransactionBuilder.Create
+         .SetBody(txBody)
+         .SetWitnesses(witnesses)
+         .Build();
+
+    var cborTransaction = tx.Serialize().ToString();
+    var actualFee = tx.CalculateAndSetFee(); *@
+            
     }
 }

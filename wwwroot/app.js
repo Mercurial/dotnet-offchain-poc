@@ -6,3 +6,11 @@ window.connectWallet = async () => {
 window.getUtxos = () => {
     return window.walletApi.getUtxos();
 }
+
+window.getAddress = () => {
+    return window.walletApi.getUsedAddresses();
+}
+
+window.signTx = (txCborHex) => {
+    return window.walletApi.signTx(txCborHex);
+}

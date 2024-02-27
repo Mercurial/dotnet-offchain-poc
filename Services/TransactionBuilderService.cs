@@ -1,9 +1,12 @@
+using Cardano.Sync.Data.Models.Datums;
 using CardanoSharp.Wallet;
 using CardanoSharp.Wallet.Enums;
 using CardanoSharp.Wallet.Extensions.Models;
 using CardanoSharp.Wallet.Models.Keys;
+using CardanoSharp.Wallet.Utilities;
+using Address = CardanoSharp.Wallet.Models.Addresses.Address;
 
-public class TransactionBuilderService
+public class CoinectaService
 {
     private readonly IConfiguration _configuration;
 
@@ -12,7 +15,7 @@ public class TransactionBuilderService
     private readonly PrivateKey _stakingPrivKey;
     private readonly PublicKey _stakingPubKey;
 
-    public TransactionBuilderService(IConfiguration configuration)
+    public CoinectaService(IConfiguration configuration)
     {
         _configuration = configuration;
         var words = configuration["TestWalletSeed"]!;
@@ -48,8 +51,13 @@ public class TransactionBuilderService
         _stakingPubKey = stakingPubKey;
     }
 
+    public Address GetWalletAddress()
+    {
+        return AddressUtility.GetBaseAddress(_paymentPubKey, _stakingPubKey, NetworkType.Preview);
+    }
+
     public async Task Lock()
     {
-        
+
     }
 }
