@@ -1,0 +1,23 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@inject IJSRuntime JsRuntime
+
+<PageTitle>Home</PageTitle>
+
+<button @onclick="Lock">Lock</button>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JsRuntime.InvokeVoidAsync("connectWallet");
+        }
+    }
+
+    private async Task Lock()
+    {
+        var result = await JsRuntime.InvokeAsync<IEnumerable<string>>("getUtxos");
+        var txInputs = CoinectaUtils.ConvertInputsCbor(result);
+    }
+}
