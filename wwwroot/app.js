@@ -11,8 +11,8 @@ window.getAddress = () => {
     return window.walletApi.getUsedAddresses();
 }
 
-window.signTx = (txCborHex) => {
-    return window.walletApi.signTx(txCborHex);
+window.signTx = (txCborHex, partialSign = false) => {
+    return window.walletApi.signTx(txCborHex, partialSign);
 }
 
 window.submitTx = (txSigned) => {

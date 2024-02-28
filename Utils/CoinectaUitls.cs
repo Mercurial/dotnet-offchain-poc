@@ -9,16 +9,26 @@ using CardanoSharp.Wallet.Enums;
 using CardanoSharp.Wallet.Models.Transactions;
 using CardanoSharp.Wallet.Models.Transactions.TransactionWitness;
 using CardanoSharp.Wallet.Extensions.Models.Transactions.TransactionWitnesses;
+using CardanoSharp.Wallet.Extensions.Models.Transactions;
 
 public class CoinectaUtils
 {
 
-    public static IEnumerable<Utxo> ConvertUtxoCbor(IEnumerable<string> utxoCbors)
+    public static IEnumerable<Utxo> ConvertUtxoListCbor(IEnumerable<string> utxoCbors)
     {
         return utxoCbors.Select(utxoCbor =>
         {
             var utxoCborObj = CBORObject.DecodeFromBytes(Convert.FromHexString(utxoCbor));
             return utxoCborObj.GetUtxo();
+        }).ToList();
+    }
+
+    public static IEnumerable<TransactionOutput> ConvertTxOutputListCbor(IEnumerable<string> txOutputCbors)
+    {
+        return txOutputCbors.Select(txOutputCbor =>
+        {
+            var txOutputCborObj = CBORObject.DecodeFromBytes(Convert.FromHexString(txOutputCbor));
+            return txOutputCborObj.GetTransactionOutput();
         }).ToList();
     }
 
@@ -39,6 +49,11 @@ public class CoinectaUtils
         .SetScript(validatorScriptCbor)
         .Build();
 
+        return ValidatorAddress(plutusScript);
+    }
+
+    public static Address ValidatorAddress(PlutusV2Script plutusScript)
+    {
         return  AddressUtility.GetEnterpriseScriptAddress(plutusScript, NetworkType.Preview);
     }
 }

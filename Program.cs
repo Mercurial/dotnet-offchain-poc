@@ -2,12 +2,13 @@ using DotnetTxBuilding.Components;
 
 
 var builder = WebApplication.CreateBuilder(args);
-
+builder.Services.AddHttpClient();
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
     
 builder.Services.AddScoped<CoinectaService>();
+builder.Services.AddScoped<MaestroService>();
 
 var app = builder.Build();
 

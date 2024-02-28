@@ -6,23 +6,52 @@
 @using CardanoSharp.Wallet.CIPs.CIP2.ChangeCreationStrategies
 @using CardanoSharp.Wallet.Models.Transactions.TransactionWitness.PlutusScripts
 @using CardanoSharp.Wallet.TransactionBuilding
+@using CardanoSharp.Wallet.Extensions.Models
 @using CardanoSharp.Wallet.Extensions.Models.Transactions
+@using CardanoSharp.Wallet.Enums
+@using CardanoSharp.Wallet.Utilities
+@using CardanoSharp.Wallet.Models.Addresses
 @using System.Text.Json
 @using CborSerialization
+@using PeterO.Cbor2
 
 @inject IJSRuntime JsRuntime
 @inject CoinectaService CoinectaService
+@inject MaestroService MaestroService
 @inject ILogger<Home> Logger
 
 <PageTitle>Home</PageTitle>
 
 <button @onclick="Lock">Lock</button>
+<button @onclick="Unlock">Unlock</button>
 
 @code {
+
+    private PlutusV2Script? PlutusScript { get; set;}
+
+    private TransactionInput ValidatorReferenceInput => new()
+    {
+        TransactionId = Convert.FromHexString("21e50398c351a120f6a9a73a1dda12970943d2814a045fa8aa9ce475e2309761"),
+        TransactionIndex = 0,
+        Output = new TransactionOutput()
+        {
+            Address = new Address("addr_test1vp7yptd2khhc0jf2vspj40ul6kgkff3wx7hdrhuqejjlfzquzf422").GetBytes(),
+            Value = new TransactionOutputValue { Coin = 17996644798 },
+            ScriptReference = new ScriptReference()
+            {
+                PlutusV2Script = PlutusScript
+            }
+        }
+    };
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
+            var plutusJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText("onchain/always-true/plutus.json"));
+            var validatorCbor = Convert.FromHexString(plutusJson.GetProperty("validators")[0].GetProperty("compiledCode").GetString()!);
+            PlutusScript = PlutusV2ScriptBuilder.Create
+            .SetScript(validatorCbor)
+            .Build();
             await JsRuntime.InvokeVoidAsync("connectWallet");
         }
     }
@@ -30,15 +59,12 @@
     private async Task Lock()
     {
         var result = await JsRuntime.InvokeAsync<IEnumerable<string>>("getUtxos");
-        var utxos = CoinectaUtils.ConvertUtxoCbor(result);
+        var utxos = CoinectaUtils.ConvertUtxoListCbor(result);
 
         var coinSelectionStrategy = new LargestFirstStrategy();
         var changeCreationStrategy = new SingleTokenBundleStrategy();
         var coinSelectionService = new CoinSelectionService(coinSelectionStrategy, changeCreationStrategy);
-        var plutusJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText("onchain/always-true/plutus.json"));
-        var validatorCbor =
-        Convert.FromHexString(plutusJson.GetProperty("validators")[0].GetProperty("compiledCode").GetString()!);
-        var validatorAddress = CoinectaUtils.ValidatorAddress(validatorCbor);
+        var validatorAddress = CoinectaUtils.ValidatorAddress(PlutusScript!);
         var changeAddress = CoinectaUtils.ConvertAddressCbor((await JsRuntime.InvokeAsync<IEnumerable<string>>("getAddress")).ToList()[0]);
 
         var output = new TransactionOutput();
@@ -77,16 +103,101 @@
         var witnessSetBuilder = TransactionWitnessSetBuilder.Create;
 
         witnessSet.VKeyWitnesses.ToList().ForEach((witness) => witnessSetBuilder.AddVKeyWitness(witness));
-        
+
         txBodyBuilder.SetFee(fee);
         var signedTxBuilder = TransactionBuilder.Create
             .SetBody(txBodyBuilder)
             .SetWitnesses(witnessSetBuilder);
-        
+
         var signedTx = signedTxBuilder.Build();
         var signedTxCborHex = Convert.ToHexString(signedTx.Serialize());
 
         var txId = await JsRuntime.InvokeAsync<string>("submitTx", signedTxCborHex);
+        Logger.LogInformation("TxId: {txId}", txId);
+    }
+
+    private async Task Unlock()
+    {
+        var validatorAddress = CoinectaUtils.ValidatorAddress(PlutusScript!);
+        var changeAddress = CoinectaUtils.ConvertAddressCbor((await JsRuntime.InvokeAsync<IEnumerable<string>>("getAddress")).ToList()[0]);
+        var validatorUtxos = (await MaestroService.GetUtxosAsync(validatorAddress.ToString())).ToList();
+
+        var result = await JsRuntime.InvokeAsync<IEnumerable<string>>("getUtxos");
+        var walletUtxos = CoinectaUtils.ConvertUtxoListCbor(result);
+
+        var coinSelectionStrategy = new LargestFirstStrategy();
+        var changeCreationStrategy = new SingleTokenBundleStrategy();
+        var coinSelectionService = new CoinSelectionService(coinSelectionStrategy, changeCreationStrategy);
+
+        var coinSelectionResult = coinSelectionService.GetCoinSelection([new() {
+            Address = changeAddress.GetBytes(),
+            Value = new TransactionOutputValue { Coin = 5_000_000 }
+        }], walletUtxos, changeAddress.ToString(), limit: 1);
+
+        var collateralUtxo = coinSelectionResult.SelectedUtxos.First();
+
+        var output = new TransactionOutput();
+        output.Address = changeAddress.GetBytes();
+        output.Value = new TransactionOutputValue()
+        {
+            Coin = 10_000_000,
+        };
+
+        var redeemerBuilder = RedeemerBuilder.Create
+            .SetTag(RedeemerTag.Spend)
+            .SetIndex(0)
+            .SetPlutusData(
+                CBORObject.DecodeFromBytes(CborConvertor.Serialize(new AlwaysTrueDatum(42))).GetPlutusData()
+            )
+            .SetExUnits(new() { Mem = 1122686, Steps = 345104086 }) as RedeemerBuilder;
+
+        var txBodyBuilder = TransactionBodyBuilder.Create;
+        txBodyBuilder.AddOutput(output);
+        txBodyBuilder.AddInput(validatorUtxos.First());
+        txBodyBuilder.SetScriptDataHash(
+            [redeemerBuilder!.Build()],
+            null,
+            CostModelUtility.PlutusV2CostModel.Serialize()
+        );
+        txBodyBuilder.AddReferenceInput(ValidatorReferenceInput);
+        txBodyBuilder.AddCollateralInput(new()
+        {
+            TransactionId = Convert.FromHexString(collateralUtxo.TxHash),
+            TransactionIndex = collateralUtxo.TxIndex
+        });
+        txBodyBuilder.AddRequiredSigner(changeAddress.GetPublicKeyHash());
+
+        var txWitnesssetBuilder = TransactionWitnessSetBuilder.Create;
+            txWitnesssetBuilder.AddRedeemer(redeemerBuilder);
+
+        var txBuilder = TransactionBuilder.Create
+            .SetBody(txBodyBuilder)
+            .SetWitnesses(txWitnesssetBuilder);
+        
+        var unsignedTx = txBuilder.Build();
+        var fee = unsignedTx.CalculateAndSetFee(numberOfVKeyWitnessesToMock: 1);
+        unsignedTx.TransactionBody.TransactionOutputs.Last().Value.Coin -= fee;
+
+        var txCborHex = Convert.ToHexString(unsignedTx.Serialize());
+
+        var witnessSetCborHex = await JsRuntime.InvokeAsync<string>("signTx", txCborHex, true);
+
+        var witnessSet = CoinectaUtils.ConvertTxWitnessSetCbor(witnessSetCborHex);
+
+        witnessSet.VKeyWitnesses.ToList().ForEach((witness) => txWitnesssetBuilder.AddVKeyWitness(witness));
+
+        txBodyBuilder.SetFee(fee);
+
+        var signedTxBuilder = TransactionBuilder.Create
+            .SetBody(txBodyBuilder)
+            .SetWitnesses(txWitnesssetBuilder);
+
+        var signedTx = signedTxBuilder.Build();
+
+        var signedTxCborHex = Convert.ToHexString(signedTx.Serialize());
+
+        var txId = await JsRuntime.InvokeAsync<string>("submitTx", signedTxCborHex);
+
         Logger.LogInformation("TxId: {txId}", txId);
     }
 }
