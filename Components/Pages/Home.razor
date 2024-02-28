@@ -8,9 +8,11 @@
 @using CardanoSharp.Wallet.TransactionBuilding
 @using CardanoSharp.Wallet.Extensions.Models.Transactions
 @using System.Text.Json
+@using CborSerialization
 
 @inject IJSRuntime JsRuntime
 @inject CoinectaService CoinectaService
+@inject ILogger<Home> Logger
 
 <PageTitle>Home</PageTitle>
 
@@ -49,11 +51,7 @@
 
         output.DatumOption = new DatumOption()
         {
-            Data = new PlutusDataConstr()
-            {
-                Alternative = 0,
-                Value = new PlutusDataArray { Value = [new PlutusDataInt { Value = 42 }] }
-            }
+            RawData = CborConvertor.Serialize(new AlwaysTrueDatum(42))
         };
 
         var coinSelectionResult = coinSelectionService.GetCoinSelection([output], utxos, changeAddress.ToString());
@@ -88,7 +86,7 @@
         var signedTx = signedTxBuilder.Build();
         var signedTxCborHex = Convert.ToHexString(signedTx.Serialize());
 
-        await JsRuntime.InvokeVoidAsync("submitTx", signedTxCborHex);
-            
+        var txId = await JsRuntime.InvokeAsync<string>("submitTx", signedTxCborHex);
+        Logger.LogInformation("TxId: {txId}", txId);
     }
 }
