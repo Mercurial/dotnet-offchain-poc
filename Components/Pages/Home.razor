@@ -149,7 +149,7 @@
             .SetPlutusData(
                 CBORObject.DecodeFromBytes(CborConvertor.Serialize(new AlwaysTrueDatum(42))).GetPlutusData()
             )
-            .SetExUnits(new() { Mem = 1122686, Steps = 345104086 }) as RedeemerBuilder;
+            .SetExUnits(new() { Mem = 0, Steps = 0 }) as RedeemerBuilder;
 
         var txBodyBuilder = TransactionBodyBuilder.Create;
         txBodyBuilder.AddOutput(output);
@@ -167,14 +167,38 @@
         });
         txBodyBuilder.AddRequiredSigner(changeAddress.GetPublicKeyHash());
 
-        var txWitnesssetBuilder = TransactionWitnessSetBuilder.Create;
-            txWitnesssetBuilder.AddRedeemer(redeemerBuilder);
+        var txWitnesssetBuilder = TransactionWitnessSetBuilder.Create
+            .AddRedeemer(redeemerBuilder);
 
         var txBuilder = TransactionBuilder.Create
             .SetBody(txBodyBuilder)
             .SetWitnesses(txWitnesssetBuilder);
         
         var unsignedTx = txBuilder.Build();
+        
+        var txEvalResults = CsBindgen.UPLCMethods.GetExUnits(unsignedTx, NetworkType.Preview);
+
+        var finalRedeemerBuilder = RedeemerBuilder.Create;
+        txEvalResults.Redeemers!.ForEach((redeemer) => finalRedeemerBuilder
+            .SetTag(redeemer.Tag)
+            .SetIndex(redeemer.Index)
+            .SetPlutusData(redeemer.PlutusData)
+            .SetExUnits(redeemer.ExUnits)
+        );
+
+        txBodyBuilder.SetScriptDataHash(
+            [finalRedeemerBuilder!.Build()],
+            null,
+            CostModelUtility.PlutusV2CostModel.Serialize()
+        );
+
+        txWitnesssetBuilder = TransactionWitnessSetBuilder.Create
+            .AddRedeemer(finalRedeemerBuilder);
+
+        txBuilder.SetWitnesses(txWitnesssetBuilder);
+
+        unsignedTx = txBuilder.Build();
+        
         var fee = unsignedTx.CalculateAndSetFee(numberOfVKeyWitnessesToMock: 1);
         unsignedTx.TransactionBody.TransactionOutputs.Last().Value.Coin -= fee;
 
