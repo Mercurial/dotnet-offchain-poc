@@ -14,3 +14,7 @@ window.getAddress = () => {
 window.signTx = (txCborHex) => {
     return window.walletApi.signTx(txCborHex);
 }
+
+window.submitTx = (txSigned) => {
+    return window.walletApi.submitTx(txSigned);
+}

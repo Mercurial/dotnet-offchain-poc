@@ -76,8 +76,6 @@
 
         var witnessSetCborHex = await JsRuntime.InvokeAsync<string>("signTx", txCborHex);
         var witnessSet = CoinectaUtils.ConvertTxWitnessSetCbor(witnessSetCborHex);
-        @* var vkWitnessBuilder = new VKeyWitnessBuilder().WithSignature(witnessSet.VKeyWitnesses.ToList()[0].Signature);
-        var vkWitness = vkWitnessBuilder.Build(); *@
         var witnessSetBuilder = TransactionWitnessSetBuilder.Create;
 
         witnessSet.VKeyWitnesses.ToList().ForEach((witness) => witnessSetBuilder.AddVKeyWitness(witness));
@@ -90,19 +88,7 @@
         var signedTx = signedTxBuilder.Build();
         var signedTxCborHex = Convert.ToHexString(signedTx.Serialize());
 
-        @* var witnesses = TransactionWitnessSetBuilder.Create
-        .AddVKeyWitness(
-        new PublicKey(paymentPub.Key, paymentPub.Chaincode),
-        new PrivateKey(paymentPrv.Key, paymentPrv.Chaincode))
-        .AddRedeemer(spendRedeemderBuilder);
-
-    var tx = TransactionBuilder.Create
-         .SetBody(txBody)
-         .SetWitnesses(witnesses)
-         .Build();
-
-    var cborTransaction = tx.Serialize().ToString();
-    var actualFee = tx.CalculateAndSetFee(); *@
+        await JsRuntime.InvokeVoidAsync("submitTx", signedTxCborHex);
             
     }
 }
